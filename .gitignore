@@ -1,0 +1,6 @@
+data/
+.python-version
+.history
+.vscode
+__pycache__
+
