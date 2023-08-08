@@ -26,7 +26,6 @@ random.seed(seed)
 torch.manual_seed(seed)
 transformers.trainer_utils.set_seed(seed)
 
-
 from BertJapaneseTokenizerFast import BertJapaneseTokenizerFast
 from ValueWatcher import ValueWatcher
 from Helperfunctions import get_metrics_scores
@@ -37,7 +36,8 @@ class Classifier(nn.Module):
         # self.encoder_f = nn.ModuleList([nn.GRU(hidden_size, hidden_size, batch_first=True) for _ in range(num_layers)])
         # self.encoder_b = nn.ModuleList([nn.GRU(hidden_size, hidden_size, batch_first=True) for _ in range(num_layers)])
         # self.attention = nn.MultiheadAttention(hidden_size, num_heads=num_heads, batch_first=True)
-        self.linear = torch.nn.Linear(hidden_size, num_class)
+        self.linear_detail = torch.nn.Linear(hidden_size, num_class - 1)
+        self.linear_binary = torch.nn.Linear(hidden_size, 1)
         # self.num_layers = num_layers
         # self.pooling_method = pooling_method
         self.dropout = torch.nn.Dropout(0.1)
@@ -52,28 +52,30 @@ class Classifier(nn.Module):
 
         # x, weights = self.attention(x, x, x, key_padding_mask=mask==0)
         x = self.dropout(x)
-        x = self.linear(x)
+        x_detail = self.linear_detail(x)
+        x_binary = self.linear_binary(x)
 
         # if self.pooling_method == 'mean':
         #     x = self.pooling_mean(x, mask)
         # elif self.pooling_method == 'max':
         #     x = self.pooling_max(x, mask)
-        return x
+        return {'binary': x_binary, 'detail': x_detail}
 
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, s1, y, informations):
+    def __init__(self, s1, y_binary, y_detail, informations):
         super().__init__()
         self.s1 = s1
         self.informations = informations
-        self.y = y
-        self.len = len(y)
+        self.y_binary = y_binary
+        self.y_detail = y_detail
+        self.len = len(y_binary)
     
     def __len__(self):
         return self.len
     
     def __getitem__(self, index):
-        return self.s1[index], self.y[index], self.informations[index]
+        return self.s1[index], self.y_binary[index], self.y_detail[index], self.informations[index]
 
 
 def get_data(resource='expert', index_fold=0):
@@ -250,36 +252,31 @@ def add_special_token(batch_tokens, index_sp):
 
 def get_properties(mode):
     if mode == 'rinna-gpt2':
-        return 'rinna/japanese-gpt2-medium', './results/rinna-japanese-gpt2-medium.conj', 100
+        return 'rinna/japanese-gpt2-medium', './results/rinna-japanese-gpt2-medium.twostage.conj', 100
     elif mode == 'tohoku-bert':
-        return 'cl-tohoku/bert-base-japanese-whole-word-masking', './results/bert-base-japanese-whole-word-masking.conj', 100
+        return 'cl-tohoku/bert-base-japanese-whole-word-masking', './results/bert-base-japanese-whole-word-masking.twostage.conj', 100
     elif mode == 'mbart':
-        return 'facebook/mbart-large-cc25', './results/mbart-large-cc25.conj', 100
+        return 'facebook/mbart-large-cc25', './results/mbart-large-cc25.twostage.conj', 100
     elif mode == 't5-base-encoder':
-        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.conj', 100
+        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.twostage.conj', 100
     elif mode == 't5-base-decoder':
-        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.conj', 100
+        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.twostage.conj', 100
     elif mode =='rinna-roberta':
-        return 'rinna/japanese-roberta-base', './results/rinna-japanese-roberta-base.conj', 100
+        return 'rinna/japanese-roberta-base', './results/rinna-japanese-roberta-base.twostage.conj', 100
     elif mode == 'nlp-waseda-roberta-base-japanese':
-        return 'nlp-waseda/roberta-base-japanese', './results/nlp-waseda-roberta-base-japanese.conj', 100
+        return 'nlp-waseda/roberta-base-japanese', './results/nlp-waseda-roberta-base-japanese.twostage.conj', 100
     elif mode == 'nlp-waseda-roberta-large-japanese':
-        return 'nlp-waseda/roberta-large-japanese', './results/nlp-waseda-roberta-large-japanese.conj', 100
+        return 'nlp-waseda/roberta-large-japanese', './results/nlp-waseda-roberta-large-japanese.twostage.conj', 100
     elif mode == 'nlp-waseda-roberta-base-japanese-with-auto-jumanpp':
-        return 'nlp-waseda/roberta-base-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-base-japanese.conj', 100
+        return 'nlp-waseda/roberta-base-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-base-japanese.twostage.conj', 100
     elif mode == 'nlp-waseda-roberta-large-japanese-with-auto-jumanpp':
-        return 'nlp-waseda/roberta-large-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-large-japanese.conj', 100
+        return 'nlp-waseda/roberta-large-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-large-japanese.twostage.conj', 100
     elif mode == 'rinna-japanese-gpt-1b':
-        return 'rinna/japanese-gpt-1b', './results/rinna-japanese-gpt-1b.conj', 100
+        return 'rinna/japanese-gpt-1b', './results/rinna-japanese-gpt-1b.twostage.conj', 100
     elif mode == 'xlm-roberta-large':
-        return 'xlm-roberta-large', './results/xlm-roberta-large.conj', 100
+        return 'xlm-roberta-large', './results/xlm-roberta-large.twostage.conj', 100
     elif mode == 'xlm-roberta-base':
-        return 'xlm-roberta-base', './results/xlm-roberta-base.conj', 100
-    elif mode == 'rinna-japanese-gpt-neox-3.6b':
-        return 'rinna/japanese-gpt-neox-3.6b', './results/rinna-japanese-gpt-neox-3.6b.conj', 100
-    elif mode == 'cyberagent-open-calm-7b':
-        return 'cyberagent/open-calm-7b', './results/cyberagent-open-calm-7b', 100
-
+        return 'xlm-roberta-base', './results/xlm-roberta-base.twostage.conj', 100
 
 def train_model(run_mode='rinna-gpt2', index_fold=0):
     EPOCHS = 10
@@ -292,7 +289,7 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
     with_print_logits = False
 
     model_name, OUTPUT_PATH, _ = get_properties(run_mode)
-    OUTPUT_PATH = OUTPUT_PATH + f'.230507.{seed}'
+    OUTPUT_PATH = OUTPUT_PATH + f'.230527.{seed}'
     Path(OUTPUT_PATH).mkdir(exist_ok=True)
     print(run_mode)
     print(OUTPUT_PATH)
@@ -341,18 +338,20 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
     model.resize_token_embeddings(len(tokenizer))
     id_conj = tokenizer._convert_token_to_id_with_added_voc(token_conj)
 
-    s1, y = [tokenizer(d['s1'] + f' {token_conj} ' + d['s2'], return_tensors='pt') for d in datasets['train']], [d['label'] for d in datasets['train']]
-    train_dataset = Dataset(s1, y, datasets['train'])
-    s1, y = [tokenizer(d['s1'] + f' {token_conj} ' + d['s2'], return_tensors='pt') for d in datasets['dev']], [d['label'] for d in datasets['dev']]
-    dev_dataset = Dataset(s1, y, datasets['dev'])
-    s1, y = [tokenizer(d['s1'] + f' {token_conj} ' + d['s2'], return_tensors='pt') for d in datasets['test']], [d['label'] for d in datasets['test']]
-    test_dataset = Dataset(s1, y, datasets['test'])
+    s1, y_binary, y_detail = [tokenizer(d['s1'] + f' {token_conj} ' + d['s2'], return_tensors='pt') for d in datasets['train']], [0 if d['label'] == label_indexer['談話関係なし'] else 1 for d in datasets['train']], [d['label'] for d in datasets['train']]
+    train_dataset = Dataset(s1, y_binary, y_detail, datasets['train'])
+    s1, y_binary, y_detail = [tokenizer(d['s1'] + f' {token_conj} ' + d['s2'], return_tensors='pt') for d in datasets['dev']], [0 if d['label'] == label_indexer['談話関係なし'] else 1 for d in datasets['dev']], [d['label'] for d in datasets['dev']]
+    dev_dataset = Dataset(s1, y_binary, y_detail, datasets['dev'])
+    s1, y_binary, y_detail = [tokenizer(d['s1'] + f' {token_conj} ' + d['s2'], return_tensors='pt') for d in datasets['test']], [0 if d['label'] == label_indexer['談話関係なし'] else 1 for d in datasets['test']], [d['label'] for d in datasets['test']]
+    test_dataset = Dataset(s1, y_binary, y_detail, datasets['test'])
 
     def collate_fn(examples):
         padding_id = examples[0][-1]['pad_token_id'] # model.tokenizer.pad_token_id
         s1 = [torch.as_tensor(example[0].input_ids[0], dtype=torch.long) for example in examples]
         s1 = torch.nn.utils.rnn.pad_sequence(s1, batch_first=True, padding_value=padding_id)
-        y = torch.as_tensor([example[1] for example in examples], dtype=torch.long)
+        # y_binary = torch.as_tensor([example[1] for example in examples], dtype=torch.long)
+        y_binary = torch.as_tensor([[example[1]] for example in examples], dtype=torch.float)
+        y_detail = torch.as_tensor([example[2] for example in examples], dtype=torch.long)
         attention_masks1 = [torch.as_tensor(example[0].attention_mask[0], dtype=torch.long) for example in examples]
         attention_masks1 = torch.nn.utils.rnn.pad_sequence(attention_masks1, batch_first=True, padding_value=0)
 
@@ -360,7 +359,7 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
             if s1.size(1) > MAX_SEQUENCE_LENGTH:
                 s1 = s1[:, :MAX_SEQUENCE_LENGTH]
                 attention_masks1 = attention_masks1[:, :MAX_SEQUENCE_LENGTH]
-        return s1, y, attention_masks1, examples
+        return s1, y_binary, y_detail, attention_masks1, examples
 
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
@@ -389,15 +388,18 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
     classifier = Classifier(model.config.hidden_size, len(label_indexer))
 
     num_training_steps = int(EPOCHS*len(train_dataloader)/GRADIENT_ACCUMULATION_STEPS) + 1
-    optimizer = torch.optim.AdamW(params=list(model.parameters()) + list(classifier.parameters()), lr=5e-6 if 'xlm' in model_name else 2e-5, weight_decay=0.1 if 'xlm' in model_name else 0.01, betas=(0.9, 0.98) if 'xlm' in model_name else (0.9, 0.99))
+    optimizer = torch.optim.AdamW(params=list(model.parameters()) + list(classifier.parameters()), lr=1e-5 if 'xlm' in model_name else 2e-5, weight_decay=0.1 if 'xlm' in model_name else 0.01, betas=(0.9, 0.98) if 'xlm' in model_name else (0.9, 0.99))
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=WARMUP_STEPS * num_training_steps, num_training_steps=num_training_steps)
     # optimizer = DAdaptAdam(params=list(model.parameters()) + list(classifier.parameters()), lr=1.0, weight_decay=4.0, decouple=True)
     # scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=WARMUP_STEPS * num_training_steps, num_training_steps=num_training_steps)
-    loss_func = torch.nn.CrossEntropyLoss()
+    # loss_func_binary = torch.nn.CrossEntropyLoss()
+    loss_func_binary = torch.nn.BCEWithLogitsLoss()
+    loss_func_detail = torch.nn.CrossEntropyLoss(ignore_index=label_indexer['談話関係なし'])
     vw = ValueWatcher()
 
     accelerator = None # Accelerator(mixed_precision=MIXED_PRECISION)
     DEVICE = torch.device('cuda:0') if accelerator is None else accelerator.device
+
     model = model.to(DEVICE)
     classifier = classifier.to(DEVICE)
     if accelerator is not None:
@@ -410,14 +412,25 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
         train_total_loss, running_loss = [], []
         model.train()
         classifier.train()
-        for i, (s1, y , m1, allx) in enumerate(train_dataloader):
-            s1, y, m1 = s1.to(DEVICE), y.to(DEVICE), m1.to(DEVICE)
+        for i, (s1, yb, yd, m1, allx) in enumerate(train_dataloader):
+            s1, yb, yd, m1 = s1.to(DEVICE), yb.to(DEVICE), yd.to(DEVICE), m1.to(DEVICE)
             outputs = model(s1, attention_mask=m1, output_hidden_states=True, decoder_input_ids=s1) if run_mode in set(['t5-base-encoder', 't5-base-decoder']) else model(s1, attention_mask=m1, output_hidden_states=True)
             h1 = outputs.encoder_last_hidden_state if run_mode in set(['t5-base-encoder']) else outputs.last_hidden_state
             h1 = torch.stack([h[item.index(id_conj)] for h, item in zip(h1, s1.tolist())])
-            logits = classifier(h1)
+            outputs = classifier(h1)
 
-            loss = loss_func(logits, y)
+            loss_binary = loss_func_binary(outputs['binary'], yb)
+            loss_detail = loss_func_detail(outputs['detail'], yd)
+            if loss_detail.isnan():
+                if loss_binary.isnan():
+                    loss = torch.zero()
+                else:
+                    loss = loss_binary
+            else:
+                if loss_binary.isnan():
+                    loss = loss_detail
+                else:
+                    loss = loss_binary + loss_detail
             if accelerator is None:
                 loss = loss / GRADIENT_ACCUMULATION_STEPS
                 loss.backward()
@@ -447,26 +460,43 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
             dev_tt, dev_ff = 0, 0
             total_dev_y, total_dev_pred = [], []
             dev_predictions = []
-            for i, (s1, y , m1, allx) in enumerate(dev_dataloader):
-                s1, y, m1 = s1.to(DEVICE), y.to(DEVICE), m1.to(DEVICE)
+            for i, (s1, yb, yd, m1, allx) in enumerate(dev_dataloader):
+                s1, yb, yd, m1 = s1.to(DEVICE), yb.to(DEVICE), yd.to(DEVICE), m1.to(DEVICE)
                 outputs = model(s1, attention_mask=m1, output_hidden_states=True, decoder_input_ids=s1) if run_mode in set(['t5-base-encoder', 't5-base-decoder']) else model(s1, attention_mask=m1, output_hidden_states=True)
                 h1 = outputs.encoder_last_hidden_state if run_mode in set(['t5-base-encoder']) else outputs.last_hidden_state
                 h1 = torch.stack([h[item.index(id_conj)] for h, item in zip(h1, s1.tolist())])
-                logits = classifier(h1)
+                outputs = classifier(h1)
+                
 
-                loss = loss_func(logits, y)
+                loss_binary = loss_func_binary(outputs['binary'], yb)
+                loss_detail = loss_func_detail(outputs['detail'], yd)
+                if loss_detail.isnan():
+                    if loss_binary.isnan():
+                        loss = torch.zero()
+                    else:
+                        loss = loss_binary
+                else:
+                    if loss_binary.isnan():
+                        loss = loss_detail
+                    else:
+                        loss = loss_binary + loss_detail
                 dev_total_loss.append(loss.item())
 
-                predicted_label = torch.argmax(logits, dim=1)
+                # predicted_label_binary = torch.argmax(outputs['binary'], dim=1)
+                predicted_label_binary = torch.where(torch.sigmoid(outputs['binary']).squeeze(1) >= 0.5, 1, 0)
+                predicted_label_detail = torch.argmax(outputs['detail'], dim=1)
+                predicted_label = torch.where(predicted_label_binary==0, torch.as_tensor([label_indexer['談話関係なし']]*predicted_label_binary.shape[0], dtype=torch.long).to(DEVICE), predicted_label_detail)
+                y = yd
+
                 total_dev_y.extend(y.tolist())
                 total_dev_pred.extend(predicted_label.tolist())
                 dev_tt += sum(predicted_label == y).item()
                 dev_ff += y.shape[0] - sum(predicted_label == y).item()
 
-                dev_predictions.extend([items[2] | {'predicted_label': {v: k for k, v in label_indexer.items()}[pred], 'predicted_index': pred, 'logits': logit, 'last_hidden_state': hidden} for items, pred, logit, hidden in zip(allx, predicted_label.tolist(), logits.tolist(), h1.tolist())])
+                dev_predictions.extend([items[3] | {'predicted_label': {v: k for k, v in label_indexer.items()}[pred], 'predicted_index': pred, 'logits_binary': logitb, 'logits_detail': logitd, 'last_hidden_state': hidden} for items, pred, logitb, logitd, hidden in zip(allx, predicted_label.tolist(), outputs['binary'].tolist(), outputs['detail'].tolist(), h1.tolist())])
 
                 if with_print_logits:
-                    print(f'{logits.item()}, {predicted_label}, {y}')
+                    print(f"{outputs['binary'].item()}, {outputs['detail'].item()}, {predicted_label}, {y}")
 
             dev_rets = get_metrics_scores(total_dev_y, total_dev_pred, label_indexer)
             dev_total_loss = sum(dev_total_loss) / len(dev_total_loss)
@@ -477,26 +507,42 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
             test_tt, test_ff = 0, 0
             total_test_y, total_test_pred = [], []
             test_predictions = []
-            for i, (s1, y , m1, allx) in enumerate(test_dataloader):
-                s1, y, m1 = s1.to(DEVICE), y.to(DEVICE), m1.to(DEVICE)
+            for i, (s1, yb, yd, m1, allx) in enumerate(test_dataloader):
+                s1, yb, yd, m1 = s1.to(DEVICE), yb.to(DEVICE), yd.to(DEVICE), m1.to(DEVICE)
                 outputs = model(s1, attention_mask=m1, output_hidden_states=True, decoder_input_ids=s1) if run_mode in set(['t5-base-encoder', 't5-base-decoder']) else model(s1, attention_mask=m1, output_hidden_states=True)
                 h1 = outputs.encoder_last_hidden_state if run_mode in set(['t5-base-encoder']) else outputs.last_hidden_state
                 h1 = torch.stack([h[item.index(id_conj)] for h, item in zip(h1, s1.tolist())])
-                logits = classifier(h1)
+                outputs = classifier(h1)
 
-                loss = loss_func(logits, y)
+                loss_binary = loss_func_binary(outputs['binary'], yb)
+                loss_detail = loss_func_detail(outputs['detail'], yd)
+                if loss_detail.isnan():
+                    if loss_binary.isnan():
+                        loss = torch.zero()
+                    else:
+                        loss = loss_binary
+                else:
+                    if loss_binary.isnan():
+                        loss = loss_detail
+                    else:
+                        loss = loss_binary + loss_detail
                 test_total_loss.append(loss.item())
 
-                predicted_label = torch.argmax(logits, dim=1)
+                # predicted_label_binary = torch.argmax(outputs['binary'], dim=1)
+                predicted_label_binary = torch.where(torch.sigmoid(outputs['binary']).squeeze(1) >= 0.5, 1, 0)
+                predicted_label_detail = torch.argmax(outputs['detail'], dim=1)
+                predicted_label = torch.where(predicted_label_binary==0, torch.as_tensor([label_indexer['談話関係なし']]*predicted_label_binary.shape[0], dtype=torch.long).to(DEVICE), predicted_label_detail)
+                y = yd
+
                 total_test_y.extend(y.tolist())
                 total_test_pred.extend(predicted_label.tolist())
                 test_tt += sum(predicted_label == y).item()
                 test_ff += y.shape[0] - sum(predicted_label == y).item()
 
-                test_predictions.extend([items[2] | {'predicted_label': {v: k for k, v in label_indexer.items()}[pred], 'predicted_index': pred, 'logits': logit, 'last_hidden_state': hidden} for items, pred, logit, hidden in zip(allx, predicted_label.tolist(), logits.tolist(), h1.tolist())])
+                test_predictions.extend([items[3] | {'predicted_label': {v: k for k, v in label_indexer.items()}[pred], 'predicted_index': pred, 'logits_binary': logitb, 'logits_detail': logitd, 'last_hidden_state': hidden} for items, pred, logitb, logitd, hidden in zip(allx, predicted_label.tolist(), outputs['binary'].tolist(), outputs['detail'].tolist(), h1.tolist())])
 
                 if with_print_logits:
-                    print(f'{logits.item()}, {predicted_label}, {y}')
+                    print(f"{outputs['binary'].item()}, {outputs['detail'].item()}, {predicted_label}, {y}")
 
             test_rets = get_metrics_scores(total_test_y, total_test_pred, label_indexer)
             test_total_loss = sum(test_total_loss) / len(test_total_loss)
@@ -560,7 +606,7 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
 
 
 if __name__ == '__main__':
-    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "2"
     os.environ['TOKENIZERS_PARALLELISM'] = 'False'
 
     # get_data(resource='crowdsourcing')
@@ -570,8 +616,6 @@ if __name__ == '__main__':
     # run_modes = ['rinna-gpt2', 'tohoku-bert', 't5-base-encoder', 't5-base-decoder', 'rinna-roberta', 'nlp-waseda-roberta-base-japanese', 'nlp-waseda-roberta-large-japanese', 'rinna-japanese-gpt-1b', 'xlm-roberta-large', 'xlm-roberta-base']
     # run_modes = ['rinna-gpt2', 'rinna-japanese-gpt-1b', 'xlm-roberta-large', 'xlm-roberta-base']
     run_modes = ['xlm-roberta-large']
-    # run_modes = ['rinna-japanese-gpt-neox-3.6b', 'cyberagent-open-calm-7b']
-
     if is_single:
         train_model(run_modes[-2], index_fold=0)
     else:

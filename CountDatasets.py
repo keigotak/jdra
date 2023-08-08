@@ -37,6 +37,18 @@ def get_data_230205(resource='expert', index_fold=0):
 if __name__=='__main__':
     all_data = []
     for i in range(5):
-        all_data.append(get_data_230205(resource='expert', index_fold=i))
+        all_data.append(get_data_230205(resource='crowd', index_fold=i))
 
-    print(all_data)
+    datasets = {}
+    data_types = ['train', 'dev', 'test']
+    for data_type in data_types:
+        datasets[data_type] = [item for items in all_data for item in items[0][data_type]]
+
+    labels = ['合計', '原因・理由', '逆接', '条件', '目的', '対比', '根拠', 'その他根拠', '談話関係なし']
+    stats = {data_type: {label: 0 for label in labels} for data_type in data_types}
+    for data_type in data_types:
+        for d in datasets[data_type]:
+            stats[data_type][d['reason']] += 1
+            stats[data_type]['合計'] += 1
+        print(data_type)
+        print(stats[data_type])

@@ -21,7 +21,7 @@ from transformers import BertModel
 from transformers import get_linear_schedule_with_warmup
 from dadaptation import DAdaptAdam
 
-seed = 0
+seed = 2
 random.seed(seed)
 torch.manual_seed(seed)
 transformers.trainer_utils.set_seed(seed)

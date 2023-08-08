@@ -60,13 +60,7 @@ METHOD_LIST ={'rand': ['.230413', '.rand'],
               'conj': ['.230507', '.conj'],
               'wonone_conj': ['.230430', '.wonone.conj'],
               'wonone_cls': ['.230502', '.wonone.cls'],
-              'conj_init': ['.230311', '.conj.init'],
-              'conj_twostage': ['.230518', '.twostage.conj'],
-              'conjcls_twostage': ['.230518', '.twostage.conjcls'],
-              'gru_conj': ['.230528', '.gru.conj'],
-              'gelu_conj': ['.230528', '.gelu.conj'],
-              'mask_conj': ['.230704', '.conj.mask'],
-              'mask_rand': ['.230705', '.rand.mask']}
+              'conj_init': ['.230311', '.conj.init']}
 METHOD = 'conj'
 TAG = METHOD_LIST[METHOD][0]
 METHOD = METHOD_LIST[METHOD][1]
@@ -87,16 +81,6 @@ def get_direction_annotations(resource='expert'):
 
     return all_datasets
 
-def get_direction_list():
-    with Path(f'./data/datasets.230201/disc_kwdlc/backwardlist.txt').open('r') as f:
-        texts = [l.strip() for l in f.readlines()]
-    return set(texts)
-
-def get_implicit_list():
-    with Path(f'./data/datasets.230201/disc_kwdlc/implicitlist.txt').open('r') as f:
-        texts = [l.strip() for l in f.readlines()]
-    return set(texts)
-
 def gather_overview():
     rets = []
     for mode in MODE_LIST:
@@ -110,7 +94,7 @@ def gather_overview():
         rets.extend(df[df['dev_semi_total_f1'] == df['dev_semi_total_f1'].max()].values.tolist())
 
     df = pd.DataFrame(rets[1:], columns=rets[0])
-    df.to_csv(f'results{TAG}{METHOD}.csv', index=None)
+    df.to_csv(f'results.twostage{TAG}{METHOD}.csv', index=None)
     print(rets)
 
 def gather_details():
@@ -121,16 +105,60 @@ def gather_details():
     label_indexer = {k: label_indexer[k] for k in ['原因・理由', '逆接・譲歩', '条件', '目的', '根拠', '対比', 'その他根拠', '談話関係なし']}
     for mode in MODE_LIST:
         model_name, OUTPUT_PATH, _ = get_properties(mode)
-        OUTPUT_PATH = OUTPUT_PATH + METHOD + TAG
         seed_results = {}
         dev_average_results, test_average_results = {item: [] for item in ['f1', 'precision', 'recall']}, {item: [] for item in ['f1', 'precision', 'recall']}
         for iseed in range(num_seed):
-            dev_results, test_results = [], []
+            dev_results_binary, test_results_binary = [], []
+            dev_results_detail, test_results_detail = [], []
+
+            tag_binary, method_binary = METHOD_LIST[METHOD[1:]]
+            tag_detail, method_detail = METHOD_LIST[f'wonone_{METHOD[1:]}']
+
             for ifold in range(num_fold):
-                files = sorted(glob.glob(OUTPUT_PATH + f'.{iseed}' + f'/*fold{ifold}*.pt'), key=natural_keys)
-                # data = torch.load(files[0])
-                dev_results.extend(torch.load(files[0])['dev_results'])
-                test_results.extend(torch.load(files[0])['test_results'])
+                files_binary = sorted(glob.glob(OUTPUT_PATH + method_binary + tag_binary + f'.{iseed}' + f'/*fold{ifold}*.pt'), key=natural_keys)
+                dev_results_binary.extend(torch.load(files_binary[0])['dev_results'])
+                test_results_binary.extend(torch.load(files_binary[0])['test_results'])
+
+                files_detail = sorted(glob.glob(OUTPUT_PATH + method_detail + tag_detail + f'.{iseed}' + f'/*fold{ifold}*.pt'), key=natural_keys)
+                dev_results_detail.extend(torch.load(files_detail[0])['dev_results'])
+                test_results_detail.extend(torch.load(files_detail[0])['test_results'])
+
+            dict_dev_results_detail = {f"{d['id']}-{d['id_s1']}-{d['id_s2']}": d for d in dev_results_detail}
+            dict_test_results_detail = {f"{d['id']}-{d['id_s1']}-{d['id_s2']}": d for d in test_results_detail}
+
+            dev_results = []
+            for b in dev_results_binary:
+                k = f"{b['id']}-{b['id_s1']}-{b['id_s2']}"
+                if b['predicted_label'] == '談話関係なし':
+                    if k in dict_dev_results_detail.keys():
+                        dev_results.append(b.copy() | {'data_type': 'dev', 'model': 'binary', 'binary': b['predicted_label'], 'detail': dict_dev_results_detail[k]['predicted_label']})
+                    else:
+                        dev_results.append(b.copy() | {'data_type': 'dev', 'model': 'binary', 'binary': b['predicted_label'], 'detail': ''})
+                else:
+                    if k in dict_dev_results_detail.keys():
+                        dev_results.append(dict_dev_results_detail[k] | {'data_type': 'dev', 'model': 'detail', 'binary': b['predicted_label'], 'detail': dict_dev_results_detail[k]['predicted_label']})
+                    else:
+                        dev_results.append(b.copy() | {'data_type': 'dev', 'model': 'binary', 'binary': b['predicted_label'], 'detail': ''})
+
+
+            test_results = []
+            for b in test_results_binary:
+                k = f"{b['id']}-{b['id_s1']}-{b['id_s2']}"
+                if b['predicted_label'] == '談話関係なし':
+                    if k in dict_test_results_detail.keys():
+                        test_results.append(b.copy() | {'data_type': 'test', 'model': 'binary', 'binary': b['predicted_label'], 'detail': dict_test_results_detail[k]['predicted_label']})
+                    else:
+                        test_results.append(b.copy() | {'data_type': 'test', 'model': 'binary', 'binary': b['predicted_label'], 'detail': ''})
+                else:
+                    if k in dict_test_results_detail.keys():
+                        test_results.append(dict_test_results_detail[k] | {'data_type': 'test', 'model': 'detail', 'binary': b['predicted_label'], 'detail': dict_test_results_detail[k]['predicted_label']})
+                    else:
+                        test_results.append(b.copy() | {'data_type': 'test', 'model': 'binary', 'binary': b['predicted_label'], 'detail': ''})
+
+            columns = list(b.keys()) + ['data_type', 'model', 'binary', 'detail']
+            data = [[d[col] for col in columns] for d in dev_results] + [[d[col] for col in columns] for d in test_results]
+            df = pd.DataFrame(data, columns=columns, index=None).drop(['logits', 'last_hidden_state'], axis=1)
+            df.to_csv('./twostep.table.tsv', sep='\t')
 
             y_true = [r['label'] for r in dev_results]
             y_pred = [r['predicted_index'] for r in dev_results]
@@ -157,9 +185,11 @@ def gather_details():
         dev_std = ', '.join([str(seed_results[f'dev_std_{k}']) for k in ['f1', 'precision', 'recall']])
         test_std = ', '.join([str(seed_results[f'test_std_{k}']) for k in ['f1', 'precision', 'recall']])
         print(f"dev: {dev_avg} | test: {test_avg}")
+
+        OUTPUT_PATH = OUTPUT_PATH + METHOD + TAG
         rets.append(f"{mode},{dev_avg.replace(' ', '')},{dev_std.replace(' ', '')},{test_avg.replace(' ', '')},{test_std.replace(' ', '')},{OUTPUT_PATH}")
 
-    with Path(f'./result{TAG}{METHOD}.csv').open('w') as f:
+    with Path(f'./result.twostage{TAG}{METHOD}.csv').open('w') as f:
         f.write(','.join(['model'] + [f'dev_avg_{k}' for k in ['f1', 'precision', 'recall']] + [f'dev_std_{k}' for k in ['f1', 'precision', 'recall']] + [f'test_avg_{k}' for k in ['f1', 'precision', 'recall']] + [f'test_std_{k}' for k in ['f1', 'precision', 'recall']] + ['model_path']))
         f.write('\n')
         f.write('\n'.join(map(str, rets)))
@@ -216,90 +246,13 @@ def gather_details_by_categories():
         print(f"dev: {dev_avg} | test: {test_avg}")
         rets.append(f"{mode},{dev_avg.replace(' ', '')},{dev_std.replace(' ', '')},{test_avg.replace(' ', '')},{test_std.replace(' ', '')},{OUTPUT_PATH}")
 
-    with Path(f'./result.bycategory{TAG}{METHOD}.230801.csv').open('w') as f:
+    with Path(f'./result.twostage.bycategory{TAG}{METHOD}.csv').open('w') as f:
         f.write(','.join(['model'] + [f'dev_avg_{label}_{metrics}' for metrics in list_metrics for label in label_indexer] + [f'dev_std_{label}_{metrics}' for metrics in list_metrics for label in label_indexer] + [f'test_avg_{label}_{metrics}' for metrics in list_metrics for label in label_indexer] + [f'test_std_{label}_{metrics}' for metrics in list_metrics for label in label_indexer] + ['model_path']))
         f.write('\n')
         f.write('\n'.join(map(str, rets)))
         f.write('\n')
 
     print(rets)
-
-def gather_details_by_eximplicit():
-    rets = []
-    num_seed = 3
-    num_fold = 5
-    label_indexer = {k: i for i, k in enumerate(['原因・理由', '目的', '条件', '根拠', '対比', '逆接・譲歩', 'その他根拠', '談話関係なし'])}
-    label_indexer = {k: label_indexer[k] for k in ['原因・理由', '逆接・譲歩', '条件', '目的', '根拠', '対比', 'その他根拠', '談話関係なし']}
-    list_metrics = ['f1', 'precision', 'recall']
-    list_eximplicit = ['explicit', 'implicit']
-
-    set_implicit = get_implicit_list()
-
-    for mode in MODE_LIST:
-        model_name, OUTPUT_PATH, _ = get_properties(mode)
-        OUTPUT_PATH = OUTPUT_PATH + METHOD + TAG
-        seed_results = {}
-        dev_average_results, test_average_results = {d: {label: {item: [] for item in list_metrics} for label in label_indexer} for d in list_eximplicit}, {d: {label: {item: [] for item in list_metrics} for label in label_indexer} for d in list_eximplicit}
-        for iseed in range(num_seed):
-            dev_results, test_results = [], []
-            for ifold in range(num_fold):
-                files = sorted(glob.glob(OUTPUT_PATH + f'.{iseed}' + f'/*fold{ifold}*.pt'), key=natural_keys)
-                # data = torch.load(files[0])
-                dev_results.extend(torch.load(files[0])['dev_results'])
-                test_results.extend(torch.load(files[0])['test_results'])
-
-            dev_results = [items | {'eximplicit': 'implicit' if f"{items['id']}-{items['id_s1']}-{items['id_s2']}" in set_implicit else 'explicit'} for items in dev_results]
-            test_results = [items | {'eximplicit': 'implicit' if f"{items['id']}-{items['id_s1']}-{items['id_s2']}" in set_implicit else 'explicit'} for items in test_results]
-
-            dev_metrics, test_metrics = {}, {}
-
-            y_true_implicit = [r['label'] for r in dev_results if r['eximplicit'] == 'implicit']
-            y_pred_implicit = [r['predicted_index'] for r in dev_results if r['eximplicit'] == 'implicit']
-            dev_metrics['implicit'] = get_metrics_scores_by_divided_type(y_true=y_true_implicit, y_pred=y_pred_implicit, label_indexer=label_indexer)
-
-            y_true_explicit = [r['label'] for r in dev_results if r['eximplicit'] == 'explicit']
-            y_pred_explicit = [r['predicted_index'] for r in dev_results if r['eximplicit'] == 'explicit']
-            dev_metrics['explicit'] = get_metrics_scores_by_divided_type(y_true=y_true_explicit, y_pred=y_pred_explicit, label_indexer=label_indexer)
-
-            y_true_implicit = [r['label'] for r in test_results if r['eximplicit'] == 'implicit']
-            y_pred_implicit = [r['predicted_index'] for r in test_results if r['eximplicit'] == 'implicit']
-            test_metrics['implicit'] = get_metrics_scores(y_true=y_true_implicit, y_pred=y_pred_implicit, label_indexer=label_indexer)
-
-            y_true_explicit = [r['label'] for r in test_results if r['eximplicit'] == 'explicit']
-            y_pred_explicit = [r['predicted_index'] for r in test_results if r['eximplicit'] == 'explicit']
-            test_metrics['explicit'] = get_metrics_scores(y_true=y_true_explicit, y_pred=y_pred_explicit, label_indexer=label_indexer)
-
-            for metrics in list_metrics:
-                for label in label_indexer:
-                    for eximplicit in list_eximplicit:
-                        dev_average_results[eximplicit][label][metrics].append(dev_metrics[eximplicit][label][metrics])
-                        test_average_results[eximplicit][label][metrics].append(test_metrics[eximplicit][label][metrics])
-
-            seed_results[iseed] = {'dev_results': dev_results.copy(), 'test_results': test_results.copy(), 'dev_metrics': dev_metrics, 'test_metrics': test_metrics}
-
-        for metrics in list_metrics:
-                for label in label_indexer:
-                    for eximplicit in list_eximplicit:
-                        seed_results[f'dev_avg_{label}_{eximplicit}_{metrics}'] = sum(dev_average_results[eximplicit][label][metrics]) / len(dev_average_results[eximplicit][label][metrics])
-                        seed_results[f'test_avg_{label}_{eximplicit}_{metrics}'] = sum(test_average_results[eximplicit][label][metrics]) / len(test_average_results[eximplicit][label][metrics])
-                        seed_results[f'dev_std_{label}_{eximplicit}_{metrics}'] = stdev(dev_average_results[eximplicit][label][metrics]) if len(dev_average_results[eximplicit][label][metrics]) > 1 else 0.0
-                        seed_results[f'test_std_{label}_{eximplicit}_{metrics}'] =  stdev(test_average_results[eximplicit][label][metrics]) if len(test_average_results[eximplicit][label][metrics]) > 1 else 0.0
-        print(mode)
-        dev_avg = ', '.join([str(seed_results[f'dev_avg_{label}_{eximplicit}_{metrics}']) for metrics in list_metrics for label in label_indexer for eximplicit in list_eximplicit])
-        test_avg = ', '.join([str(seed_results[f'test_avg_{label}_{eximplicit}_{metrics}']) for metrics in list_metrics for label in label_indexer for eximplicit in list_eximplicit])
-        dev_std = ', '.join([str(seed_results[f'dev_std_{label}_{eximplicit}_{metrics}']) for metrics in list_metrics for label in label_indexer for eximplicit in list_eximplicit])
-        test_std = ', '.join([str(seed_results[f'test_std_{label}_{eximplicit}_{metrics}']) for metrics in list_metrics for label in label_indexer for eximplicit in list_eximplicit])
-        print(f"dev: {dev_avg} | test: {test_avg}")
-        rets.append(f"{mode},{dev_avg.replace(' ', '')},{dev_std.replace(' ', '')},{test_avg.replace(' ', '')},{test_std.replace(' ', '')},{OUTPUT_PATH}")
-
-    with Path(f'./result.byeximplicit{TAG}{METHOD}.csv').open('w') as f:
-        f.write(','.join(['model'] + [f'dev_avg_{label}_{eximplicit}_{metrics}' for metrics in list_metrics for label in label_indexer for eximplicit in list_eximplicit] + [f'dev_std_{label}_{eximplicit}_{metrics}' for metrics in list_metrics for label in label_indexer for eximplicit in list_eximplicit] + [f'test_avg_{label}_{eximplicit}_{metrics}' for metrics in list_metrics for label in label_indexer for eximplicit in list_eximplicit] + [f'test_std_{label}_{eximplicit}_{metrics}' for metrics in list_metrics for label in label_indexer for eximplicit in list_eximplicit] + ['model_path']))
-        f.write('\n')
-        f.write('\n'.join(map(str, rets)))
-        f.write('\n')
-
-    print(rets)
-
 
 def gather_details_by_direction():
     rets = []
@@ -369,7 +322,7 @@ def gather_details_by_direction():
         print(f"dev: {dev_avg} | test: {test_avg}")
         rets.append(f"{mode},{dev_avg.replace(' ', '')},{dev_std.replace(' ', '')},{test_avg.replace(' ', '')},{test_std.replace(' ', '')},{OUTPUT_PATH}")
 
-    with Path(f'./result.bydirection{TAG}{METHOD}.csv').open('w') as f:
+    with Path(f'./result.twostage.bydirection{TAG}{METHOD}.csv').open('w') as f:
         f.write(','.join(['model'] + [f'dev_avg_{label}_{direction}_{metrics}' for metrics in list_metrics for label in label_indexer for direction in list_directions] + [f'dev_std_{label}_{direction}_{metrics}' for metrics in list_metrics for label in label_indexer for direction in list_directions] + [f'test_avg_{label}_{direction}_{metrics}' for metrics in list_metrics for label in label_indexer for direction in list_directions] + [f'test_std_{label}_{direction}_{metrics}' for metrics in list_metrics for label in label_indexer for direction in list_directions] + ['model_path']))
         f.write('\n')
         f.write('\n'.join(map(str, rets)))
@@ -449,7 +402,7 @@ def gather_embeddings():
             data = pd.DataFrame(data=data, columns=['UMAP1', 'UMAP2', 'category'])
             plt.figure()
             g = sns.scatterplot(data=data, x='UMAP1', y='UMAP2', hue='category', palette='Set1')
-            plt.savefig(f'./test.scatterplot.{model_name.replace("/", ".")}{METHOD}{TAG}.{mode_decomposition}.png')
+            plt.savefig(f'./scatterplot.twostage.{model_name.replace("/", ".")}{METHOD}{TAG}.{mode_decomposition}.png')
 
 def gather_confusion_matrics():
     rets = []
@@ -492,7 +445,7 @@ def gather_confusion_matrics():
         plt.xlabel("Pred.")
         plt.ylabel("Gold")
         # ax.set_ylim(len(cm), 0)
-        plt.savefig(f'cm.{mode}{METHOD}{TAG}.png')
+        plt.savefig(f'cm.twostage.{mode}{METHOD}{TAG}.png')
 
         print(test_cm)
 
@@ -501,11 +454,11 @@ def gather_confusion_matrics():
 
 
 def compare_details():
-    files = ['./result.230507.conj.csv', './result.230301.cls.csv', './result.230413.eos.csv', './result.230413.rand.csv', './result.230227.concat.csv', './result.230418.gconcat.csv', './result.230528.gelu.conj.csv', './result.230528.gru.conj.csv', './result.230430.wonone.conj.csv', './result.230502.wonone.cls.csv', './result.230704.conj.mask.csv', './result.230705.rand.mask.csv']
-    tag1 = ['CONJ', 'CLS', 'EOS', 'RAND', 'LCONC', 'GCONC', 'CONJ+GELU', 'CONJ+GRU', 'CONJ w/o no rel.', 'CLS w/o no rel.', 'MASK+CONJ', 'MASK+CONJ']
+    files = ['./result.230507.conj.csv', './result.230301.cls.csv', './result.230413.eos.csv', './result.230413.rand.csv', './result.230227.concat.csv', './result.230418.gconcat.csv', './result.230518.twostage.conj.csv', './result.230518.twostage.conjcls.csv', './result.230430.wonone.conj.csv', './result.230502.wonone.cls.csv']
+    tag1 = ['CONJ', 'CLS', 'EOS', 'RAND', 'LCONC', 'GCONC', 'CONJ two-stage', 'CONJCLS two-stage', 'CONJ w/o no rel.', 'CLS w/o no rel.']
     tag2 = ['f1', 'precision', 'recall']
     tag3 = ['test', 'dev']
-    # models = ['tohoku-bert', 'nlp-waseda-roberta-base-japanese', 'rinna-roberta', 'nlp-waseda-roberta-large-japanese', 'xlm-roberta-base', 'xlm-roberta-large', 't5-base-encoder', 't5-base-decoder', 'rinna-japanese-gpt-1b', 'rinna-gpt2']
+    models = ['tohoku-bert', 'nlp-waseda-roberta-base-japanese', 'rinna-roberta', 'nlp-waseda-roberta-large-japanese', 'xlm-roberta-base', 'xlm-roberta-large', 't5-base-encoder', 't5-base-decoder', 'rinna-japanese-gpt-1b', 'rinna-gpt2']
     models = ['xlm-roberta-large']
     model_tags = {'rinna-gpt2': 'GPT2', 'tohoku-bert': 'BERT', 't5-base-encoder': 'T5', 't5-base-decoder': 'T5', 'rinna-roberta': 'RoBERTa', 'nlp-waseda-roberta-base-japanese': 'RoBERTa', 'nlp-waseda-roberta-large-japanese': 'RoBERTa', 'rinna-japanese-gpt-1b': 'GPT', 'xlm-roberta-large': 'XLM', 'xlm-roberta-base': 'XLM'}
     header = ['', 'Test', 'Dev', 'Test', 'Dev', 'Test', 'Dev']
@@ -528,7 +481,7 @@ def compare_details():
                     ret.append(rf'{avg}$\pm{{{std}}}$')
             rets[t1].append(ret.copy())
     
-    with Path('./result.table.230706.csv').open('w') as f:
+    with Path('./result.twostage.table.230527.csv').open('w') as f:
         f.write(' & '.join(header) + ' \\\\\n')
         f.write(' & '.join(['BERT \cite{omura-kurohashi-2022-improving}', '47.0 $\pm{2.4}$', '-', '55.9 $\pm{1.1}$', '-', '41.0 $\pm{2.9}$', '-']) + ' \\\\\n')
         f.write(' & '.join(['XLM \cite{omura-kurohashi-2022-improving}', ' 51.9 $\pm{0.2}$', '-', '57.8 $\pm{2.3}$', '-', '48.2 $\pm{0.3}$', '-']) + ' \\\\\n')
@@ -539,8 +492,8 @@ def compare_details():
 
 
 def compare_details_by_categories():
-    files = ['./result.bycategory.230507.conj.230801.csv', './result.bycategory.230301.cls.csv', './result.bycategory.230413.eos.csv', './result.bycategory.230413.rand.csv', './result.bycategory.230227.concat.csv', './result.bycategory.230418.gconcat.csv', './result.bycategory.230528.gelu.conj.csv', './result.bycategory.230528.gru.conj.csv', './result.bycategory.230430.wonone.conj.csv', './result.bycategory.230502.wonone.cls.csv', './result.bycategory.230704.conj.mask.csv', './result.bycategory.230705.rand.mask.csv']
-    methods = ['CONJ', 'CLS', 'EOS', 'RAND', 'LCONC', 'GCONC', 'CONJ+GELU', 'CONJ+GRU', 'CONJ w/o no rel.', 'CLS w/o no rel.', 'MASK+CONJ', 'MASK+RAND']
+    files = ['./result.bycategory.230507.conj.csv', './result.bycategory.230301.cls.csv', './result.bycategory.230413.eos.csv', './result.bycategory.230413.rand.csv', './result.bycategory.230227.concat.csv', './result.bycategory.230418.gconcat.csv', './result.bycategory.230518.twostage.conj.csv', './result.bycategory.230518.twostage.conjcls.csv', './result.bycategory.230430.wonone.conj.csv', './result.bycategory.230502.wonone.cls.csv']
+    methods = ['CONJ', 'CLS', 'EOS', 'RAND', 'LCONC', 'GCONC', 'CONJ two-stage', 'CONJCLS two-stage', 'CONJ w/o no rel.', 'CLS w/o no rel.']
     metricses = ['f1', 'precision', 'recall']
     # tag2 = ['f1']
     modes = ['test', 'dev']
@@ -571,7 +524,7 @@ def compare_details_by_categories():
                         ret[f'{mode}_{label}_{metrics}'] = f'{avg}$\pm{{{std}}}$'
             rets[method][items['model']] = ret.copy()
     
-    with Path('./result.table.bycategories.230801.csv').open('w') as f:
+    with Path('./result.twostage.table.bycategories.230527.csv').open('w') as f:
         f.write('|'.join(models) + '\n')
         for i, label in enumerate(key_labels):
             flg_label_en = True
@@ -630,7 +583,7 @@ def compare_details_by_categories_wo_no_relations():
                         ret[f'{mode}_{label}_{metrics}'] = f'{avg}$\pm{{{std}}}$'
             rets[method][items['model']] = ret.copy()
     
-    with Path('./result.table.bycategories.wonorelation.230506.csv').open('w') as f:
+    with Path('./result.twostage.table.bycategories.wonorelation.230506.csv').open('w') as f:
         f.write('|'.join(models) + '\n')
         for i, label in enumerate(key_labels):
             flg_label_en = True
@@ -660,8 +613,8 @@ def compare_details_by_categories_wo_no_relations():
             f.write('\hline\n')
 
 def compare_details_by_directions_xlm_bymethods():
-    files = ['./result.bydirection.230507.conj.csv', './result.bydirection.230301.cls.csv', './result.bydirection.230413.eos.csv', './result.bydirection.230413.rand.csv', './result.bydirection.230227.concat.csv', './result.bydirection.230418.gconcat.csv']
-    methods = ['CONJ', 'CLS', 'EOS', 'RAND', 'LCONC', 'GCONC']
+    files = ['./result.bydirection.230507.conj.csv', './result.bydirection.230301.cls.csv', './result.bydirection.230413.eos.csv']
+    methods = ['CONJ', 'CLS', 'EOS']
     metricses = ['f1', 'precision', 'recall']
     list_directions = ['forward', 'backward']
     dict_directions = {'forward': 'Forward', 'backward': 'Backward'}
@@ -698,7 +651,7 @@ def compare_details_by_directions_xlm_bymethods():
             rets[method][items['model']] = ret.copy()
     
     
-    with Path('./result.table.bydirections.xlm.bymethods.230716.csv').open('w') as f:
+    with Path('./result.twostage.table.bydirections.xlm.bymethods.230504.csv').open('w') as f:
         for j, direction in enumerate(list_directions):
             f.write('\hline\n')
             f.write(dict_directions[direction] + ' \\\\\n')
@@ -719,68 +672,6 @@ def compare_details_by_directions_xlm_bymethods():
                         else:
                             f.write('\n'.join([' & '.join(['', method] + items[2:])]) + ' \\\\\n')
                 f.write('\hline\n')
-
-def compare_details_by_eximplicit_xlm_bymethods():
-    files = ['./result.byeximplicit.230507.conj.csv', './result.byeximplicit.230301.cls.csv', './result.byeximplicit.230413.eos.csv', './result.byeximplicit.230413.rand.csv', './result.byeximplicit.230227.concat.csv', './result.byeximplicit.230418.gconcat.csv']
-    methods = ['CONJ', 'CLS', 'EOS', 'RAND', 'LCONC', 'GCONC']
-    metricses = ['f1', 'precision', 'recall']
-    list_eximplicit = ['explicit', 'implicit']
-    dict_eximplicit = {'explicit': 'Explicit', 'implicit': 'Implicit'}
-    modes = ['test', 'dev']
-    key_labels = ['原因・理由', '逆接・譲歩', '条件', '目的', '根拠', '対比', 'その他根拠', '談話関係なし']
-    # key_labels = ['原因・理由', '目的', '条件', '根拠', '対比', '逆接・譲歩', 'その他根拠']
-    dict_label_en = {'原因・理由': 'Cause or Reason', '目的': 'Purpose', '条件': 'Condition', '根拠': 'Justification', '対比': 'Contrast', '逆接・譲歩': 'Concession', 'その他根拠': 'Misc', '談話関係なし': 'None'}
-
-    # models = ['tohoku-bert', 'nlp-waseda-roberta-base-japanese', 'rinna-roberta', 'xlm-roberta-base', 'nlp-waseda-roberta-large-japanese', 'xlm-roberta-large', 't5-base-encoder', 't5-base-decoder', 'rinna-japanese-gpt-1b', 'rinna-gpt2']
-    # models = ['tohoku-bert', 'xlm-roberta-large']
-    models = ['xlm-roberta-large']
-    model_tags = {'rinna-gpt2': 'GPT2', 'tohoku-bert': 'BERT', 't5-base-encoder': 'T5', 't5-base-decoder': 'T5', 'rinna-roberta': 'RoBERTa', 'nlp-waseda-roberta-base-japanese': 'RoBERTa', 'nlp-waseda-roberta-large-japanese': 'RoBERTa', 'rinna-japanese-gpt-1b': 'GPT', 'xlm-roberta-large': 'XLM', 'xlm-roberta-base': 'XLM'}
-    header = ['', 'Test', 'Dev', 'Test', 'Dev', 'Test', 'Dev']
-    rets = {method: {} for method in methods}
-    for file, method in zip(files, methods):
-        df = pd.read_csv(file, index_col=None, header=0)
-        df = df.T.to_dict()
-        sorted_df = []
-        for model in models:
-            for items in df.values():
-                if items['model'] == model:
-                    sorted_df.append(items.copy())
-
-        df = sorted_df
-        for items in df:
-            ret = {'method': f"{method}", 'model': items['model']}
-            for metrics in metricses:
-                for eximplicit in list_eximplicit:
-                    for label in key_labels:
-                        for mode in modes:
-                            avg = decimal.Decimal(str(items[f'{mode}_avg_{label}_{eximplicit}_{metrics}'] * 100)).quantize(decimal.Decimal('0.1'), rounding=decimal.ROUND_HALF_UP)
-                            std = decimal.Decimal(str(items[f'{mode}_std_{label}_{eximplicit}_{metrics}'] * 100)).quantize(decimal.Decimal('0.1'), rounding=decimal.ROUND_HALF_UP)
-                            ret[f'{mode}_{label}_{eximplicit}_{metrics}'] = f'{avg}$\pm{{{std}}}$'
-            rets[method][items['model']] = ret.copy()
-    
-    
-    with Path('./result.table.byeximplicit.xlm.bymethods.230715.csv').open('w') as f:
-        for j, eximplicit in enumerate(list_eximplicit):
-            f.write('\hline\n')
-            f.write(dict_eximplicit[eximplicit] + ' \\\\\n')
-            f.write('\hline\n')
-            for i, label in enumerate(key_labels):
-                flg_label = True
-                for method in methods:
-                    for model in rets[method].keys():
-                        tmp = []
-                        items = [eximplicit, model_tags[model]]
-                        for metrics in metricses:
-                            for mode in modes:
-                                tmp.append(f'{mode}_{label}_{eximplicit}_{metrics}')
-                                items.append(rets[method][model][f'{mode}_{label}_{eximplicit}_{metrics}'])
-                        if flg_label:
-                            f.write('\n'.join([' & '.join([dict_label_en[label], method] + items[2:])]) + ' \\\\\n')
-                            flg_label = False
-                        else:
-                            f.write('\n'.join([' & '.join(['', method] + items[2:])]) + ' \\\\\n')
-                f.write('\hline\n')
-
 
 def compare_details_by_directions_conj_bymodels():
     files = ['./result.bydirection.230507.conj.csv']
@@ -820,7 +711,7 @@ def compare_details_by_directions_conj_bymodels():
             rets[method][items['model']] = ret.copy()
     
     
-    with Path('./result.table.bydirections.conj.bymodels.230504.csv').open('w') as f:
+    with Path('./result.twostage.table.bydirections.conj.bymodels.230504.csv').open('w') as f:
         for j, direction in enumerate(list_directions):
             f.write('\hline\n')
             f.write(dict_directions[direction] + ' \\\\\n')
@@ -844,7 +735,6 @@ def compare_details_by_directions_conj_bymodels():
                 f.write('\hline\n')
 
 
-
 if __name__=='__main__':
     # gather_overview()
     # gather_details() # 結果ファイル生成
@@ -852,10 +742,8 @@ if __name__=='__main__':
     # gather_confusion_matrics() # confusion matrix 生成
     # gather_details_by_categories() # 分類別の結果ファイル生成
     # gather_details_by_direction() # 方向別の分析
-    gather_details_by_eximplicit() # 明示的か非明示的かの分析
-    # compare_details() # 全体の結果集計後 tex 生成
-    # compare_details_by_categories() # 分類別に結果集計後 tex 生成
+    compare_details() # 全体の結果集計後 tex 生成
+    compare_details_by_categories() # 分類別に結果集計後 tex 生成
     # compare_details_by_categories_wo_no_relations() # 分類別に結果集計後 tex 生成
     # compare_details_by_directions_xlm_bymethods() # 方向別に結果集計後 tex 生成
     # compare_details_by_directions_conj_bymodels() # 方向別に結果集計後 tex 生成
-    # compare_details_by_eximplicit_xlm_bymethods() # 明示的別に結果的集計後 tex 生成

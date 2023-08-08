@@ -20,46 +20,77 @@ from transformers import AutoTokenizer, AutoModel
 from transformers import BertModel
 from transformers import get_linear_schedule_with_warmup
 from dadaptation import DAdaptAdam
+# from rwkv.model import Block
 
-seed = 2
+seed = 0
 random.seed(seed)
 torch.manual_seed(seed)
 transformers.trainer_utils.set_seed(seed)
-
 
 from BertJapaneseTokenizerFast import BertJapaneseTokenizerFast
 from ValueWatcher import ValueWatcher
 from Helperfunctions import get_metrics_scores
 
+def get_nvidia_device_id():
+    return "0"
+
 class Classifier(nn.Module):
-    def __init__(self, hidden_size, num_class):
+    def __init__(self, hidden_size, num_class, num_layers=3):
         super(Classifier, self).__init__()
-        # self.encoder_f = nn.ModuleList([nn.GRU(hidden_size, hidden_size, batch_first=True) for _ in range(num_layers)])
-        # self.encoder_b = nn.ModuleList([nn.GRU(hidden_size, hidden_size, batch_first=True) for _ in range(num_layers)])
+        self.encoder_f = nn.ModuleList([nn.GRU(hidden_size, hidden_size, batch_first=True) for _ in range(num_layers)])
+        self.encoder_b = nn.ModuleList([nn.GRU(hidden_size, hidden_size, batch_first=True) for _ in range(num_layers)])
         # self.attention = nn.MultiheadAttention(hidden_size, num_heads=num_heads, batch_first=True)
         self.linear = torch.nn.Linear(hidden_size, num_class)
-        # self.num_layers = num_layers
-        # self.pooling_method = pooling_method
+        self.num_layers = num_layers
+        # self.pooling_method = 'mean'
         self.dropout = torch.nn.Dropout(0.1)
-    
-    def forward(self, x):
-        # for i in range(self.num_layers):
-        #     for enc in [self.encoder_f[i], self.encoder_b[i]]:
-        #         encoder_outputs, hidden = enc(x)
-        #         x = encoder_outputs + x
-        #         x = x[torch.arange(x.shape[0]-1, -1, -1), :, :]
-        #         x = self.dropout(x)
+        self.blocks = nn.ModuleList([Block(args, i) for i in range(num_layers)])
+
+        self.ln_out = nn.LayerNorm(hidden_size)
+
+
+    def forward(self, x, mask):
+        for i in range(self.num_layers):
+            for enc in [self.encoder_f[i], self.encoder_b[i]]:
+                encoder_outputs, hidden = enc(x)
+                x = encoder_outputs + x
+                x = x[torch.arange(x.shape[0]-1, -1, -1), :, :]
+                x = self.dropout(x)
 
         # x, weights = self.attention(x, x, x, key_padding_mask=mask==0)
-        x = self.dropout(x)
-        x = self.linear(x)
 
         # if self.pooling_method == 'mean':
         #     x = self.pooling_mean(x, mask)
         # elif self.pooling_method == 'max':
         #     x = self.pooling_max(x, mask)
+
+        x = self.dropout(x)
+        x = self.linear(x)
         return x
 
+    def pooling_mean(self, x, mask):
+        mask = torch.argmin(mask, dim=1, keepdim=True)
+        mask, idx = torch.sort(mask, dim=0)
+        x = torch.gather(x, dim=0, index=idx.unsqueeze(2).expand(-1, x.shape[1], x.shape[2]))
+        unique_items, counts = torch.unique_consecutive(mask, return_counts=True)
+        unique_items = unique_items.tolist()
+        counts = [0] + torch.cumsum(counts, -1).tolist()
+        x = torch.cat([torch.mean(x[counts[i]: counts[i+1], :ui, :], dim=1) if ui != 0 else torch.mean(x[counts[i]: counts[i+1], :, :], dim=1) for i, ui in enumerate(unique_items)])
+        idx = torch.argsort(idx, dim=0)
+        x = torch.gather(x, dim=0, index=idx.expand(-1, x.shape[1]))
+        return x
+
+    def pooling_max(self, x, mask):
+        mask = torch.argmin(mask, dim=1, keepdim=True)
+        mask, idx = torch.sort(mask, dim=0)
+        x = torch.gather(x, dim=0, index=idx.unsqueeze(2).expand(-1, x.shape[1], x.shape[2]))
+        unique_items, counts = torch.unique_consecutive(mask, return_counts=True)
+        unique_items = unique_items.tolist()
+        counts = [0] + torch.cumsum(counts, -1).tolist()
+        x = torch.cat([torch.max(x[counts[i]: counts[i+1], :ui, :], dim=1)[0] if ui != 0 else torch.max(x[counts[i]: counts[i+1], :, :], dim=1)[0] for i, ui in enumerate(unique_items)])
+        idx = torch.argsort(idx, dim=0)
+        x = torch.gather(x, dim=0, index=idx.expand(-1, x.shape[1]))
+        return x
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, s1, y, informations):
@@ -250,35 +281,35 @@ def add_special_token(batch_tokens, index_sp):
 
 def get_properties(mode):
     if mode == 'rinna-gpt2':
-        return 'rinna/japanese-gpt2-medium', './results/rinna-japanese-gpt2-medium.conj', 100
+        return 'rinna/japanese-gpt2-medium', './results/rinna-japanese-gpt2-medium.gru.conj', 100
     elif mode == 'tohoku-bert':
-        return 'cl-tohoku/bert-base-japanese-whole-word-masking', './results/bert-base-japanese-whole-word-masking.conj', 100
+        return 'cl-tohoku/bert-base-japanese-whole-word-masking', './results/bert-base-japanese-whole-word-masking.gru.conj', 100
     elif mode == 'mbart':
-        return 'facebook/mbart-large-cc25', './results/mbart-large-cc25.conj', 100
+        return 'facebook/mbart-large-cc25', './results/mbart-large-cc25.gru.conj', 100
     elif mode == 't5-base-encoder':
-        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.conj', 100
+        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.gru.conj', 100
     elif mode == 't5-base-decoder':
-        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.conj', 100
+        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.gru.conj', 100
     elif mode =='rinna-roberta':
-        return 'rinna/japanese-roberta-base', './results/rinna-japanese-roberta-base.conj', 100
+        return 'rinna/japanese-roberta-base', './results/rinna-japanese-roberta-base.gru.conj', 100
     elif mode == 'nlp-waseda-roberta-base-japanese':
-        return 'nlp-waseda/roberta-base-japanese', './results/nlp-waseda-roberta-base-japanese.conj', 100
+        return 'nlp-waseda/roberta-base-japanese', './results/nlp-waseda-roberta-base-japanese.gru.conj', 100
     elif mode == 'nlp-waseda-roberta-large-japanese':
-        return 'nlp-waseda/roberta-large-japanese', './results/nlp-waseda-roberta-large-japanese.conj', 100
+        return 'nlp-waseda/roberta-large-japanese', './results/nlp-waseda-roberta-large-japanese.gru.conj', 100
     elif mode == 'nlp-waseda-roberta-base-japanese-with-auto-jumanpp':
-        return 'nlp-waseda/roberta-base-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-base-japanese.conj', 100
+        return 'nlp-waseda/roberta-base-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-base-japanese.gru.conj', 100
     elif mode == 'nlp-waseda-roberta-large-japanese-with-auto-jumanpp':
-        return 'nlp-waseda/roberta-large-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-large-japanese.conj', 100
+        return 'nlp-waseda/roberta-large-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-large-japanese.gru.conj', 100
     elif mode == 'rinna-japanese-gpt-1b':
-        return 'rinna/japanese-gpt-1b', './results/rinna-japanese-gpt-1b.conj', 100
+        return 'rinna/japanese-gpt-1b', './results/rinna-japanese-gpt-1b.gru.conj', 100
     elif mode == 'xlm-roberta-large':
-        return 'xlm-roberta-large', './results/xlm-roberta-large.conj', 100
+        return 'xlm-roberta-large', './results/xlm-roberta-large.gru.conj', 100
     elif mode == 'xlm-roberta-base':
-        return 'xlm-roberta-base', './results/xlm-roberta-base.conj', 100
+        return 'xlm-roberta-base', './results/xlm-roberta-base.gru.conj', 100
     elif mode == 'rinna-japanese-gpt-neox-3.6b':
-        return 'rinna/japanese-gpt-neox-3.6b', './results/rinna-japanese-gpt-neox-3.6b.conj', 100
+        return 'rinna/japanese-gpt-neox-3.6b', './results/rinna-japanese-gpt-neox-3.6b.gru.conj', 100
     elif mode == 'cyberagent-open-calm-7b':
-        return 'cyberagent/open-calm-7b', './results/cyberagent-open-calm-7b', 100
+        return 'cyberagent/open-calm-7b', './results/cyberagent-open-calm-7b.gru.conj', 100
 
 
 def train_model(run_mode='rinna-gpt2', index_fold=0):
@@ -292,7 +323,7 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
     with_print_logits = False
 
     model_name, OUTPUT_PATH, _ = get_properties(run_mode)
-    OUTPUT_PATH = OUTPUT_PATH + f'.230507.{seed}'
+    OUTPUT_PATH = OUTPUT_PATH + f'.230528.{seed}'
     Path(OUTPUT_PATH).mkdir(exist_ok=True)
     print(run_mode)
     print(OUTPUT_PATH)
@@ -389,7 +420,7 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
     classifier = Classifier(model.config.hidden_size, len(label_indexer))
 
     num_training_steps = int(EPOCHS*len(train_dataloader)/GRADIENT_ACCUMULATION_STEPS) + 1
-    optimizer = torch.optim.AdamW(params=list(model.parameters()) + list(classifier.parameters()), lr=5e-6 if 'xlm' in model_name else 2e-5, weight_decay=0.1 if 'xlm' in model_name else 0.01, betas=(0.9, 0.98) if 'xlm' in model_name else (0.9, 0.99))
+    optimizer = torch.optim.AdamW(params=list(model.parameters()) + list(classifier.parameters()), lr=1e-5 if 'xlm' in model_name else 2e-5, weight_decay=0.1 if 'xlm' in model_name else 0.01, betas=(0.9, 0.98) if 'xlm' in model_name else (0.9, 0.99))
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=WARMUP_STEPS * num_training_steps, num_training_steps=num_training_steps)
     # optimizer = DAdaptAdam(params=list(model.parameters()) + list(classifier.parameters()), lr=1.0, weight_decay=4.0, decouple=True)
     # scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=WARMUP_STEPS * num_training_steps, num_training_steps=num_training_steps)
@@ -414,8 +445,8 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
             s1, y, m1 = s1.to(DEVICE), y.to(DEVICE), m1.to(DEVICE)
             outputs = model(s1, attention_mask=m1, output_hidden_states=True, decoder_input_ids=s1) if run_mode in set(['t5-base-encoder', 't5-base-decoder']) else model(s1, attention_mask=m1, output_hidden_states=True)
             h1 = outputs.encoder_last_hidden_state if run_mode in set(['t5-base-encoder']) else outputs.last_hidden_state
-            h1 = torch.stack([h[item.index(id_conj)] for h, item in zip(h1, s1.tolist())])
-            logits = classifier(h1)
+            logits = classifier(h1, m1)
+            logits = torch.stack([h[item.index(id_conj)] for h, item in zip(logits, s1.tolist())])
 
             loss = loss_func(logits, y)
             if accelerator is None:
@@ -451,8 +482,8 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
                 s1, y, m1 = s1.to(DEVICE), y.to(DEVICE), m1.to(DEVICE)
                 outputs = model(s1, attention_mask=m1, output_hidden_states=True, decoder_input_ids=s1) if run_mode in set(['t5-base-encoder', 't5-base-decoder']) else model(s1, attention_mask=m1, output_hidden_states=True)
                 h1 = outputs.encoder_last_hidden_state if run_mode in set(['t5-base-encoder']) else outputs.last_hidden_state
-                h1 = torch.stack([h[item.index(id_conj)] for h, item in zip(h1, s1.tolist())])
-                logits = classifier(h1)
+                logits = classifier(h1, m1)
+                logits = torch.stack([h[item.index(id_conj)] for h, item in zip(logits, s1.tolist())])
 
                 loss = loss_func(logits, y)
                 dev_total_loss.append(loss.item())
@@ -481,8 +512,8 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
                 s1, y, m1 = s1.to(DEVICE), y.to(DEVICE), m1.to(DEVICE)
                 outputs = model(s1, attention_mask=m1, output_hidden_states=True, decoder_input_ids=s1) if run_mode in set(['t5-base-encoder', 't5-base-decoder']) else model(s1, attention_mask=m1, output_hidden_states=True)
                 h1 = outputs.encoder_last_hidden_state if run_mode in set(['t5-base-encoder']) else outputs.last_hidden_state
-                h1 = torch.stack([h[item.index(id_conj)] for h, item in zip(h1, s1.tolist())])
-                logits = classifier(h1)
+                logits = classifier(h1, m1)
+                logits = torch.stack([h[item.index(id_conj)] for h, item in zip(logits, s1.tolist())])
 
                 loss = loss_func(logits, y)
                 test_total_loss.append(loss.item())
@@ -560,7 +591,7 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
 
 
 if __name__ == '__main__':
-    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+    os.environ["CUDA_VISIBLE_DEVICES"] = get_nvidia_device_id()
     os.environ['TOKENIZERS_PARALLELISM'] = 'False'
 
     # get_data(resource='crowdsourcing')

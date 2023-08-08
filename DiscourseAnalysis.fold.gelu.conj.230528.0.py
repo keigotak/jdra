@@ -31,6 +31,9 @@ from BertJapaneseTokenizerFast import BertJapaneseTokenizerFast
 from ValueWatcher import ValueWatcher
 from Helperfunctions import get_metrics_scores
 
+def get_nvidia_device_id():
+    return "2"
+
 class Classifier(nn.Module):
     def __init__(self, hidden_size, num_class):
         super(Classifier, self).__init__()
@@ -41,7 +44,8 @@ class Classifier(nn.Module):
         # self.num_layers = num_layers
         # self.pooling_method = pooling_method
         self.dropout = torch.nn.Dropout(0.1)
-    
+        self.gelu = torch.nn.GELU()
+
     def forward(self, x):
         # for i in range(self.num_layers):
         #     for enc in [self.encoder_f[i], self.encoder_b[i]]:
@@ -52,6 +56,7 @@ class Classifier(nn.Module):
 
         # x, weights = self.attention(x, x, x, key_padding_mask=mask==0)
         x = self.dropout(x)
+        x = self.gelu(x)
         x = self.linear(x)
 
         # if self.pooling_method == 'mean':
@@ -250,35 +255,35 @@ def add_special_token(batch_tokens, index_sp):
 
 def get_properties(mode):
     if mode == 'rinna-gpt2':
-        return 'rinna/japanese-gpt2-medium', './results/rinna-japanese-gpt2-medium.conj', 100
+        return 'rinna/japanese-gpt2-medium', './results/rinna-japanese-gpt2-medium.gelu.conj', 100
     elif mode == 'tohoku-bert':
-        return 'cl-tohoku/bert-base-japanese-whole-word-masking', './results/bert-base-japanese-whole-word-masking.conj', 100
+        return 'cl-tohoku/bert-base-japanese-whole-word-masking', './results/bert-base-japanese-whole-word-masking.gelu.conj', 100
     elif mode == 'mbart':
-        return 'facebook/mbart-large-cc25', './results/mbart-large-cc25.conj', 100
+        return 'facebook/mbart-large-cc25', './results/mbart-large-cc25.gelu.conj', 100
     elif mode == 't5-base-encoder':
-        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.conj', 100
+        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.gelu.conj', 100
     elif mode == 't5-base-decoder':
-        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.conj', 100
+        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.gelu.conj', 100
     elif mode =='rinna-roberta':
-        return 'rinna/japanese-roberta-base', './results/rinna-japanese-roberta-base.conj', 100
+        return 'rinna/japanese-roberta-base', './results/rinna-japanese-roberta-base.gelu.conj', 100
     elif mode == 'nlp-waseda-roberta-base-japanese':
-        return 'nlp-waseda/roberta-base-japanese', './results/nlp-waseda-roberta-base-japanese.conj', 100
+        return 'nlp-waseda/roberta-base-japanese', './results/nlp-waseda-roberta-base-japanese.gelu.conj', 100
     elif mode == 'nlp-waseda-roberta-large-japanese':
-        return 'nlp-waseda/roberta-large-japanese', './results/nlp-waseda-roberta-large-japanese.conj', 100
+        return 'nlp-waseda/roberta-large-japanese', './results/nlp-waseda-roberta-large-japanese.gelu.conj', 100
     elif mode == 'nlp-waseda-roberta-base-japanese-with-auto-jumanpp':
-        return 'nlp-waseda/roberta-base-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-base-japanese.conj', 100
+        return 'nlp-waseda/roberta-base-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-base-japanese.gelu.conj', 100
     elif mode == 'nlp-waseda-roberta-large-japanese-with-auto-jumanpp':
-        return 'nlp-waseda/roberta-large-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-large-japanese.conj', 100
+        return 'nlp-waseda/roberta-large-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-large-japanese.gelu.conj', 100
     elif mode == 'rinna-japanese-gpt-1b':
-        return 'rinna/japanese-gpt-1b', './results/rinna-japanese-gpt-1b.conj', 100
+        return 'rinna/japanese-gpt-1b', './results/rinna-japanese-gpt-1b.gelu.conj', 100
     elif mode == 'xlm-roberta-large':
-        return 'xlm-roberta-large', './results/xlm-roberta-large.conj', 100
+        return 'xlm-roberta-large', './results/xlm-roberta-large.gelu.conj', 100
     elif mode == 'xlm-roberta-base':
-        return 'xlm-roberta-base', './results/xlm-roberta-base.conj', 100
+        return 'xlm-roberta-base', './results/xlm-roberta-base.gelu.conj', 100
     elif mode == 'rinna-japanese-gpt-neox-3.6b':
-        return 'rinna/japanese-gpt-neox-3.6b', './results/rinna-japanese-gpt-neox-3.6b.conj', 100
+        return 'rinna/japanese-gpt-neox-3.6b', './results/rinna-japanese-gpt-neox-3.6b.gelu.conj', 100
     elif mode == 'cyberagent-open-calm-7b':
-        return 'cyberagent/open-calm-7b', './results/cyberagent-open-calm-7b', 100
+        return 'cyberagent/open-calm-7b', './results/cyberagent-open-calm-7b.gelu.conj', 100
 
 
 def train_model(run_mode='rinna-gpt2', index_fold=0):
@@ -292,7 +297,7 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
     with_print_logits = False
 
     model_name, OUTPUT_PATH, _ = get_properties(run_mode)
-    OUTPUT_PATH = OUTPUT_PATH + f'.230507.{seed}'
+    OUTPUT_PATH = OUTPUT_PATH + f'.230528.{seed}'
     Path(OUTPUT_PATH).mkdir(exist_ok=True)
     print(run_mode)
     print(OUTPUT_PATH)
@@ -560,7 +565,7 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
 
 
 if __name__ == '__main__':
-    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+    os.environ["CUDA_VISIBLE_DEVICES"] = get_nvidia_device_id()
     os.environ['TOKENIZERS_PARALLELISM'] = 'False'
 
     # get_data(resource='crowdsourcing')

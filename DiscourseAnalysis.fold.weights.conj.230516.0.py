@@ -26,7 +26,6 @@ random.seed(seed)
 torch.manual_seed(seed)
 transformers.trainer_utils.set_seed(seed)
 
-
 from BertJapaneseTokenizerFast import BertJapaneseTokenizerFast
 from ValueWatcher import ValueWatcher
 from Helperfunctions import get_metrics_scores
@@ -250,36 +249,31 @@ def add_special_token(batch_tokens, index_sp):
 
 def get_properties(mode):
     if mode == 'rinna-gpt2':
-        return 'rinna/japanese-gpt2-medium', './results/rinna-japanese-gpt2-medium.conj', 100
+        return 'rinna/japanese-gpt2-medium', './results/rinna-japanese-gpt2-medium.weights.conj', 100
     elif mode == 'tohoku-bert':
-        return 'cl-tohoku/bert-base-japanese-whole-word-masking', './results/bert-base-japanese-whole-word-masking.conj', 100
+        return 'cl-tohoku/bert-base-japanese-whole-word-masking', './results/bert-base-japanese-whole-word-masking.weights.conj', 100
     elif mode == 'mbart':
-        return 'facebook/mbart-large-cc25', './results/mbart-large-cc25.conj', 100
+        return 'facebook/mbart-large-cc25', './results/mbart-large-cc25.weights.conj', 100
     elif mode == 't5-base-encoder':
-        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.conj', 100
+        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.weights.conj', 100
     elif mode == 't5-base-decoder':
-        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.conj', 100
+        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.weights.conj', 100
     elif mode =='rinna-roberta':
-        return 'rinna/japanese-roberta-base', './results/rinna-japanese-roberta-base.conj', 100
+        return 'rinna/japanese-roberta-base', './results/rinna-japanese-roberta-base.weights.conj', 100
     elif mode == 'nlp-waseda-roberta-base-japanese':
-        return 'nlp-waseda/roberta-base-japanese', './results/nlp-waseda-roberta-base-japanese.conj', 100
+        return 'nlp-waseda/roberta-base-japanese', './results/nlp-waseda-roberta-base-japanese.weights.conj', 100
     elif mode == 'nlp-waseda-roberta-large-japanese':
-        return 'nlp-waseda/roberta-large-japanese', './results/nlp-waseda-roberta-large-japanese.conj', 100
+        return 'nlp-waseda/roberta-large-japanese', './results/nlp-waseda-roberta-large-japanese.weights.conj', 100
     elif mode == 'nlp-waseda-roberta-base-japanese-with-auto-jumanpp':
-        return 'nlp-waseda/roberta-base-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-base-japanese.conj', 100
+        return 'nlp-waseda/roberta-base-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-base-japanese.weights.conj', 100
     elif mode == 'nlp-waseda-roberta-large-japanese-with-auto-jumanpp':
-        return 'nlp-waseda/roberta-large-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-large-japanese.conj', 100
+        return 'nlp-waseda/roberta-large-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-large-japanese.weights.conj', 100
     elif mode == 'rinna-japanese-gpt-1b':
-        return 'rinna/japanese-gpt-1b', './results/rinna-japanese-gpt-1b.conj', 100
+        return 'rinna/japanese-gpt-1b', './results/rinna-japanese-gpt-1b.weights.conj', 100
     elif mode == 'xlm-roberta-large':
-        return 'xlm-roberta-large', './results/xlm-roberta-large.conj', 100
+        return 'xlm-roberta-large', './results/xlm-roberta-large.weights.conj', 100
     elif mode == 'xlm-roberta-base':
-        return 'xlm-roberta-base', './results/xlm-roberta-base.conj', 100
-    elif mode == 'rinna-japanese-gpt-neox-3.6b':
-        return 'rinna/japanese-gpt-neox-3.6b', './results/rinna-japanese-gpt-neox-3.6b.conj', 100
-    elif mode == 'cyberagent-open-calm-7b':
-        return 'cyberagent/open-calm-7b', './results/cyberagent-open-calm-7b', 100
-
+        return 'xlm-roberta-base', './results/xlm-roberta-base.weights.conj', 100
 
 def train_model(run_mode='rinna-gpt2', index_fold=0):
     EPOCHS = 10
@@ -292,7 +286,7 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
     with_print_logits = False
 
     model_name, OUTPUT_PATH, _ = get_properties(run_mode)
-    OUTPUT_PATH = OUTPUT_PATH + f'.230507.{seed}'
+    OUTPUT_PATH = OUTPUT_PATH + f'.230516.{seed}'
     Path(OUTPUT_PATH).mkdir(exist_ok=True)
     print(run_mode)
     print(OUTPUT_PATH)
@@ -393,11 +387,15 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=WARMUP_STEPS * num_training_steps, num_training_steps=num_training_steps)
     # optimizer = DAdaptAdam(params=list(model.parameters()) + list(classifier.parameters()), lr=1.0, weight_decay=4.0, decouple=True)
     # scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=WARMUP_STEPS * num_training_steps, num_training_steps=num_training_steps)
-    loss_func = torch.nn.CrossEntropyLoss()
     vw = ValueWatcher()
 
     accelerator = None # Accelerator(mixed_precision=MIXED_PRECISION)
     DEVICE = torch.device('cuda:0') if accelerator is None else accelerator.device
+
+    weight = {'原因・理由': 12212, '目的': 2192, '条件': 3298, '根拠': 1947, '対比': 1927, '逆接・譲歩': 3957, 'その他根拠': 1, '談話関係なし': 161921}
+    weight = torch.as_tensor([1. - v / sum(weight.values()) for v in weight.values()]).to(DEVICE)
+    loss_func = torch.nn.CrossEntropyLoss(weight=weight)
+
     model = model.to(DEVICE)
     classifier = classifier.to(DEVICE)
     if accelerator is not None:
@@ -560,7 +558,7 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
 
 
 if __name__ == '__main__':
-    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "2"
     os.environ['TOKENIZERS_PARALLELISM'] = 'False'
 
     # get_data(resource='crowdsourcing')
@@ -570,8 +568,6 @@ if __name__ == '__main__':
     # run_modes = ['rinna-gpt2', 'tohoku-bert', 't5-base-encoder', 't5-base-decoder', 'rinna-roberta', 'nlp-waseda-roberta-base-japanese', 'nlp-waseda-roberta-large-japanese', 'rinna-japanese-gpt-1b', 'xlm-roberta-large', 'xlm-roberta-base']
     # run_modes = ['rinna-gpt2', 'rinna-japanese-gpt-1b', 'xlm-roberta-large', 'xlm-roberta-base']
     run_modes = ['xlm-roberta-large']
-    # run_modes = ['rinna-japanese-gpt-neox-3.6b', 'cyberagent-open-calm-7b']
-
     if is_single:
         train_model(run_modes[-2], index_fold=0)
     else:

@@ -21,7 +21,7 @@ from transformers import BertModel
 from transformers import get_linear_schedule_with_warmup
 from dadaptation import DAdaptAdam
 
-seed = 2
+seed = 0
 random.seed(seed)
 torch.manual_seed(seed)
 transformers.trainer_utils.set_seed(seed)
@@ -250,39 +250,34 @@ def add_special_token(batch_tokens, index_sp):
 
 def get_properties(mode):
     if mode == 'rinna-gpt2':
-        return 'rinna/japanese-gpt2-medium', './results/rinna-japanese-gpt2-medium.conj', 100
+        return 'rinna/japanese-gpt2-medium', './results/rinna-japanese-gpt2-medium.rand.mask', 100
     elif mode == 'tohoku-bert':
-        return 'cl-tohoku/bert-base-japanese-whole-word-masking', './results/bert-base-japanese-whole-word-masking.conj', 100
+        return 'cl-tohoku/bert-base-japanese-whole-word-masking', './results/bert-base-japanese-whole-word-masking.rand.mask', 100
     elif mode == 'mbart':
-        return 'facebook/mbart-large-cc25', './results/mbart-large-cc25.conj', 100
+        return 'facebook/mbart-large-cc25', './results/mbart-large-cc25.rand.mask', 100
     elif mode == 't5-base-encoder':
-        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.conj', 100
+        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.rand.mask', 100
     elif mode == 't5-base-decoder':
-        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.conj', 100
+        return 'megagonlabs/t5-base-japanese-web', './results/t5-base-japanese-web.rand.mask', 100
     elif mode =='rinna-roberta':
-        return 'rinna/japanese-roberta-base', './results/rinna-japanese-roberta-base.conj', 100
+        return 'rinna/japanese-roberta-base', './results/rinna-japanese-roberta-base.rand.mask', 100
     elif mode == 'nlp-waseda-roberta-base-japanese':
-        return 'nlp-waseda/roberta-base-japanese', './results/nlp-waseda-roberta-base-japanese.conj', 100
+        return 'nlp-waseda/roberta-base-japanese', './results/nlp-waseda-roberta-base-japanese.rand.mask', 100
     elif mode == 'nlp-waseda-roberta-large-japanese':
-        return 'nlp-waseda/roberta-large-japanese', './results/nlp-waseda-roberta-large-japanese.conj', 100
+        return 'nlp-waseda/roberta-large-japanese', './results/nlp-waseda-roberta-large-japanese.rand.mask', 100
     elif mode == 'nlp-waseda-roberta-base-japanese-with-auto-jumanpp':
-        return 'nlp-waseda/roberta-base-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-base-japanese.conj', 100
+        return 'nlp-waseda/roberta-base-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-base-japanese.rand.mask', 100
     elif mode == 'nlp-waseda-roberta-large-japanese-with-auto-jumanpp':
-        return 'nlp-waseda/roberta-large-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-large-japanese.conj', 100
+        return 'nlp-waseda/roberta-large-japanese-with-auto-jumanpp', './results/nlp-waseda-roberta-large-japanese.rand.mask', 100
     elif mode == 'rinna-japanese-gpt-1b':
-        return 'rinna/japanese-gpt-1b', './results/rinna-japanese-gpt-1b.conj', 100
+        return 'rinna/japanese-gpt-1b', './results/rinna-japanese-gpt-1b.rand.mask', 100
     elif mode == 'xlm-roberta-large':
-        return 'xlm-roberta-large', './results/xlm-roberta-large.conj', 100
+        return 'xlm-roberta-large', './results/xlm-roberta-large.rand.mask', 100
     elif mode == 'xlm-roberta-base':
-        return 'xlm-roberta-base', './results/xlm-roberta-base.conj', 100
-    elif mode == 'rinna-japanese-gpt-neox-3.6b':
-        return 'rinna/japanese-gpt-neox-3.6b', './results/rinna-japanese-gpt-neox-3.6b.conj', 100
-    elif mode == 'cyberagent-open-calm-7b':
-        return 'cyberagent/open-calm-7b', './results/cyberagent-open-calm-7b', 100
-
+        return 'xlm-roberta-base', './results/xlm-roberta-base.rand.mask', 100
 
 def train_model(run_mode='rinna-gpt2', index_fold=0):
-    EPOCHS = 10
+    EPOCHS = 30
     TRAIN_BATCH_SIZE = 16
     INFERENCE_BATCH_SIZE = 32
     WARMUP_STEPS = 0.1
@@ -292,7 +287,7 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
     with_print_logits = False
 
     model_name, OUTPUT_PATH, _ = get_properties(run_mode)
-    OUTPUT_PATH = OUTPUT_PATH + f'.230507.{seed}'
+    OUTPUT_PATH = OUTPUT_PATH + f'.230705.{seed}'
     Path(OUTPUT_PATH).mkdir(exist_ok=True)
     print(run_mode)
     print(OUTPUT_PATH)
@@ -336,16 +331,17 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
     # datasets['train'] = train_dataset
     # datasets['dev'] = dev_dataset
 
-    token_conj = '[CJ]'
-    tokenizer.add_special_tokens({'additional_special_tokens': [token_conj]})
-    model.resize_token_embeddings(len(tokenizer))
-    id_conj = tokenizer._convert_token_to_id_with_added_voc(token_conj)
+    token_mask = tokenizer.mask_token
+    id_mask = tokenizer.mask_token_id
 
-    s1, y = [tokenizer(d['s1'] + f' {token_conj} ' + d['s2'], return_tensors='pt') for d in datasets['train']], [d['label'] for d in datasets['train']]
+    s1, y = [tokenizer(d['s1'] + d['s2'], return_tensors='pt') for d in datasets['train']], [d['label'] for d in datasets['train']]
+    s1 = add_special_token(s1, id_mask)
     train_dataset = Dataset(s1, y, datasets['train'])
-    s1, y = [tokenizer(d['s1'] + f' {token_conj} ' + d['s2'], return_tensors='pt') for d in datasets['dev']], [d['label'] for d in datasets['dev']]
+    s1, y = [tokenizer(d['s1'] + d['s2'], return_tensors='pt') for d in datasets['dev']], [d['label'] for d in datasets['dev']]
+    s1 = add_special_token(s1, id_mask)
     dev_dataset = Dataset(s1, y, datasets['dev'])
-    s1, y = [tokenizer(d['s1'] + f' {token_conj} ' + d['s2'], return_tensors='pt') for d in datasets['test']], [d['label'] for d in datasets['test']]
+    s1, y = [tokenizer(d['s1'] + d['s2'], return_tensors='pt') for d in datasets['test']], [d['label'] for d in datasets['test']]
+    s1 = add_special_token(s1, id_mask)
     test_dataset = Dataset(s1, y, datasets['test'])
 
     def collate_fn(examples):
@@ -414,7 +410,7 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
             s1, y, m1 = s1.to(DEVICE), y.to(DEVICE), m1.to(DEVICE)
             outputs = model(s1, attention_mask=m1, output_hidden_states=True, decoder_input_ids=s1) if run_mode in set(['t5-base-encoder', 't5-base-decoder']) else model(s1, attention_mask=m1, output_hidden_states=True)
             h1 = outputs.encoder_last_hidden_state if run_mode in set(['t5-base-encoder']) else outputs.last_hidden_state
-            h1 = torch.stack([h[item.index(id_conj)] for h, item in zip(h1, s1.tolist())])
+            h1 = torch.stack([h[item.index(id_mask)] for h, item in zip(h1, s1.tolist())])
             logits = classifier(h1)
 
             loss = loss_func(logits, y)
@@ -451,7 +447,7 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
                 s1, y, m1 = s1.to(DEVICE), y.to(DEVICE), m1.to(DEVICE)
                 outputs = model(s1, attention_mask=m1, output_hidden_states=True, decoder_input_ids=s1) if run_mode in set(['t5-base-encoder', 't5-base-decoder']) else model(s1, attention_mask=m1, output_hidden_states=True)
                 h1 = outputs.encoder_last_hidden_state if run_mode in set(['t5-base-encoder']) else outputs.last_hidden_state
-                h1 = torch.stack([h[item.index(id_conj)] for h, item in zip(h1, s1.tolist())])
+                h1 = torch.stack([h[item.index(id_mask)] for h, item in zip(h1, s1.tolist())])
                 logits = classifier(h1)
 
                 loss = loss_func(logits, y)
@@ -481,7 +477,7 @@ def train_model(run_mode='rinna-gpt2', index_fold=0):
                 s1, y, m1 = s1.to(DEVICE), y.to(DEVICE), m1.to(DEVICE)
                 outputs = model(s1, attention_mask=m1, output_hidden_states=True, decoder_input_ids=s1) if run_mode in set(['t5-base-encoder', 't5-base-decoder']) else model(s1, attention_mask=m1, output_hidden_states=True)
                 h1 = outputs.encoder_last_hidden_state if run_mode in set(['t5-base-encoder']) else outputs.last_hidden_state
-                h1 = torch.stack([h[item.index(id_conj)] for h, item in zip(h1, s1.tolist())])
+                h1 = torch.stack([h[item.index(id_mask)] for h, item in zip(h1, s1.tolist())])
                 logits = classifier(h1)
 
                 loss = loss_func(logits, y)
@@ -568,10 +564,7 @@ if __name__ == '__main__':
     # run_modes = ['xlm-roberta-base']
     # run_modes = ['rinna-gpt2', 'tohoku-bert', 't5-base-encoder', 't5-base-decoder', 'rinna-roberta', 'nlp-waseda-roberta-base-japanese', 'nlp-waseda-roberta-large-japanese', 'nlp-waseda-roberta-base-japanese-with-auto-jumanpp', 'nlp-waseda-roberta-large-japanese-with-auto-jumanpp', 'rinna-japanese-gpt-1b', 'xlm-roberta-large', 'xlm-roberta-base']
     # run_modes = ['rinna-gpt2', 'tohoku-bert', 't5-base-encoder', 't5-base-decoder', 'rinna-roberta', 'nlp-waseda-roberta-base-japanese', 'nlp-waseda-roberta-large-japanese', 'rinna-japanese-gpt-1b', 'xlm-roberta-large', 'xlm-roberta-base']
-    # run_modes = ['rinna-gpt2', 'rinna-japanese-gpt-1b', 'xlm-roberta-large', 'xlm-roberta-base']
     run_modes = ['xlm-roberta-large']
-    # run_modes = ['rinna-japanese-gpt-neox-3.6b', 'cyberagent-open-calm-7b']
-
     if is_single:
         train_model(run_modes[-2], index_fold=0)
     else:
